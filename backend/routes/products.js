@@ -168,102 +168,8 @@ router.get('/categories', async (req, res) => {
   }
 });
 
-// Get single product by ID
-router.get('/:id', async (req, res) => {
-  try {
-    const productId = req.params.id;
-
-    const product = await Product.findByPk(productId, {
-      include: [
-        {
-          model: User,
-          as: 'seller',
-          attributes: ['id', 'first_name', 'last_name', 'email', 'created_at']
-        },
-        {
-          model: Category,
-          as: 'category',
-          attributes: ['id', 'name', 'slug', 'description']
-        },
-        {
-          model: Review,
-          as: 'reviews',
-          attributes: ['id', 'rating', 'comment', 'created_at'],
-          include: [
-            {
-              model: User,
-              attributes: ['first_name', 'last_name']
-            }
-          ],
-          limit: 10,
-          order: [['created_at', 'DESC']]
-        }
-      ]
-    });
-
-    if (!product) {
-      return res.status(404).json({
-        error: 'Not Found',
-        message: 'Product not found'
-      });
-    }
-
-    const formattedProduct = {
-      id: product.id,
-      title: product.name,
-      description: product.description,
-      price: parseFloat(product.price),
-      originalPrice: product.original_price ? parseFloat(product.original_price) : null,
-      images: product.images || ['/api/placeholder/300/200'],
-      rating: parseFloat(product.rating_average) || 0,
-      reviewCount: product.rating_count || 0,
-      isFeatured: product.is_featured || false,
-      condition: product.condition,
-      brand: product.brand,
-      specifications: product.specifications || {},
-      features: product.features || [],
-      seller: product.seller ? {
-        id: product.seller.id,
-        name: `${product.seller.first_name} ${product.seller.last_name}`,
-        email: product.seller.email,
-        memberSince: product.seller.created_at
-      } : null,
-      category: product.category ? {
-        id: product.category.id,
-        name: product.category.name,
-        slug: product.category.slug,
-        description: product.category.description
-      } : null,
-      supportBonus: product.support_bonus_enabled ? product.support_bonus_percentage : 0,
-      installments: product.installment_enabled ? product.max_installments : 0,
-      minDownPayment: product.min_down_payment || 0,
-      stock: product.stock_quantity,
-      totalSales: product.total_sales || 0,
-      reviews: product.reviews ? product.reviews.map(review => ({
-        id: review.id,
-        rating: review.rating,
-        comment: review.comment,
-        createdAt: review.created_at,
-        reviewer: review.User ? `${review.User.first_name} ${review.User.last_name}` : 'Anonymous'
-      })) : [],
-      createdAt: product.created_at,
-      updatedAt: product.updated_at
-    };
-
-    res.json({
-      product: formattedProduct
-    });
-
-  } catch (error) {
-    console.error('Get product error:', error);
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Failed to get product'
-    });
-  }
-});
-
 // Search products (alternative endpoint)
+// Registered before '/:id', which would otherwise match '/search' as an id.
 router.get('/search', async (req, res) => {
   try {
     const { q, category, limit = 10 } = req.query;
@@ -332,6 +238,102 @@ router.get('/search', async (req, res) => {
     res.status(500).json({
       error: 'Internal Server Error',
       message: 'Failed to search products'
+    });
+  }
+});
+
+// Get single product by ID
+router.get('/:id', async (req, res) => {
+  try {
+    const productId = req.params.id;
+
+    const product = await Product.findByPk(productId, {
+      include: [
+        {
+          model: User,
+          as: 'seller',
+          attributes: ['id', 'first_name', 'last_name', 'email', 'created_at']
+        },
+        {
+          model: Category,
+          as: 'category',
+          attributes: ['id', 'name', 'slug', 'description']
+        },
+        {
+          model: Review,
+          as: 'reviews',
+          attributes: ['id', 'rating', 'comment', 'created_at'],
+          include: [
+            {
+              model: User,
+              as: 'user',
+              attributes: ['first_name', 'last_name']
+            }
+          ],
+          limit: 10,
+          order: [['created_at', 'DESC']]
+        }
+      ]
+    });
+
+    if (!product) {
+      return res.status(404).json({
+        error: 'Not Found',
+        message: 'Product not found'
+      });
+    }
+
+    const formattedProduct = {
+      id: product.id,
+      title: product.name,
+      description: product.description,
+      price: parseFloat(product.price),
+      originalPrice: product.original_price ? parseFloat(product.original_price) : null,
+      images: product.images || ['/api/placeholder/300/200'],
+      rating: parseFloat(product.rating_average) || 0,
+      reviewCount: product.rating_count || 0,
+      isFeatured: product.is_featured || false,
+      condition: product.condition,
+      brand: product.brand,
+      specifications: product.specifications || {},
+      features: product.features || [],
+      seller: product.seller ? {
+        id: product.seller.id,
+        name: `${product.seller.first_name} ${product.seller.last_name}`,
+        email: product.seller.email,
+        memberSince: product.seller.created_at
+      } : null,
+      category: product.category ? {
+        id: product.category.id,
+        name: product.category.name,
+        slug: product.category.slug,
+        description: product.category.description
+      } : null,
+      supportBonus: product.support_bonus_enabled ? product.support_bonus_percentage : 0,
+      installments: product.installment_enabled ? product.max_installments : 0,
+      minDownPayment: product.min_down_payment || 0,
+      stock: product.stock_quantity,
+      totalSales: product.total_sales || 0,
+      reviews: product.reviews ? product.reviews.map(review => ({
+        id: review.id,
+        rating: review.rating,
+        comment: review.comment,
+        createdAt: review.created_at,
+        reviewer: review.user ? `${review.user.first_name} ${review.user.last_name}` : 'Anonymous'
+      })) : [],
+      createdAt: product.created_at,
+      updatedAt: product.updated_at
+    };
+
+    res.json({
+      product: formattedProduct
+    });
+
+  } catch (error) {
+    console.error('Get product error:', error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Failed to get product'
     });
   }
 });
