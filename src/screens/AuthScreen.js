@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as SecureStore from 'expo-secure-store';
+import * as Crypto from 'expo-crypto';
 import apiClient, { ApiError } from '../services/api';
 import WelcomeModal from '../components/WelcomeModal';
 import { useCustomAlert } from '../hooks/useCustomAlert';
@@ -403,6 +404,40 @@ const getUserFromRegistry = async (email) => {
   }
 };
 
+// Offline sign-in checks the password against a salted SHA-256 hash saved on
+// this device after the last successful sign-in or registration. The password
+// itself is never stored.
+const OFFLINE_CREDENTIALS_KEY = 'offlineCredentials';
+
+const hashPassword = (salt, password) =>
+  Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${salt}:${password}`);
+
+const saveOfflineCredential = async (email, password) => {
+  try {
+    const stored = await SecureStore.getItemAsync(OFFLINE_CREDENTIALS_KEY);
+    const credentials = stored ? JSON.parse(stored) : {};
+    const salt = Crypto.randomUUID();
+    credentials[email.toLowerCase().trim()] = { salt, hash: await hashPassword(salt, password) };
+    await SecureStore.setItemAsync(OFFLINE_CREDENTIALS_KEY, JSON.stringify(credentials));
+  } catch (error) {
+    console.error('Error saving offline credential:', error);
+  }
+};
+
+const checkOfflineCredential = async (email, password) => {
+  try {
+    const stored = await SecureStore.getItemAsync(OFFLINE_CREDENTIALS_KEY);
+    const credential = stored ? JSON.parse(stored)[email.toLowerCase().trim()] : null;
+    if (!credential) {
+      return false;
+    }
+    return (await hashPassword(credential.salt, password)) === credential.hash;
+  } catch (error) {
+    console.error('Error checking offline credential:', error);
+    return false;
+  }
+};
+
 export default function AuthScreen({ navigation, route, onAuthSuccess }) {
   // Get onAuthSuccess from props (preferred) or route params (fallback)
   const authSuccessCallback = onAuthSuccess || (route?.params?.onAuthSuccess);
@@ -632,6 +667,7 @@ export default function AuthScreen({ navigation, route, onAuthSuccess }) {
           if (response.user && response.token) {
             // Store user in registry for future offline access
             await storeUserInRegistry(response.user);
+            await saveOfflineCredential(email, password);
             
             // Store current session using the API response
             await SecureStore.setItemAsync('currentUser', JSON.stringify(response.user));
@@ -655,7 +691,13 @@ export default function AuthScreen({ navigation, route, onAuthSuccess }) {
             });
           }
         } catch (apiError) {
-          console.log('API login failed, attempting local fallback...');
+          // Use the accounts on this device only when the server cannot be
+          // reached. When it answered (wrong password, suspended account),
+          // show its answer instead of signing in locally.
+          if (!(apiError instanceof ApiError && apiError.isNetworkError())) {
+            throw apiError;
+          }
+          console.log('API unreachable, attempting local fallback...');
           
           // Check for admin credentials first
           if (email === ADMIN_CREDENTIALS.email && password === ADMIN_CREDENTIALS.password) {
@@ -685,10 +727,19 @@ export default function AuthScreen({ navigation, route, onAuthSuccess }) {
             return;
           }
           
-          // For regular users, check the user registry
+          // For regular users, check the user registry and the saved password hash
           const registeredUser = await getUserFromRegistry(email);
+          if (registeredUser && !(await checkOfflineCredential(email, password))) {
+            showAlert({
+              type: 'error',
+              title: 'Login Failed',
+              message: 'Could not verify this password offline. Check the password, or connect to the internet and sign in once on this device.',
+              buttons: [{ text: 'OK', onPress: () => {} }]
+            });
+            return;
+          }
           if (registeredUser) {
-            // User exists in registry, log them in
+            // User exists in registry and the password matches, log them in
             await SecureStore.setItemAsync('currentUser', JSON.stringify(registeredUser));
             await SecureStore.setItemAsync('auth_token', `local_token_${registeredUser.id}`);
             
@@ -733,6 +784,7 @@ export default function AuthScreen({ navigation, route, onAuthSuccess }) {
           if (response.user && response.token) {
             // Store user in registry for future offline access
             await storeUserInRegistry(response.user);
+            await saveOfflineCredential(email, password);
             
             // Store current session using the API response
             await SecureStore.setItemAsync('currentUser', JSON.stringify(response.user));
@@ -753,7 +805,12 @@ export default function AuthScreen({ navigation, route, onAuthSuccess }) {
             });
           }
         } catch (apiError) {
-          console.log('API registration failed, attempting local fallback...');
+          // Create a local account only when the server cannot be reached.
+          // When it answered (email already registered, invalid data), show that.
+          if (!(apiError instanceof ApiError && apiError.isNetworkError())) {
+            throw apiError;
+          }
+          console.log('API unreachable, attempting local fallback...');
           
           // Fallback to local storage when API is unavailable
           console.log('Creating local user from registration data:', {
@@ -783,6 +840,7 @@ export default function AuthScreen({ navigation, route, onAuthSuccess }) {
           
           // Store user in persistent registry (survives logout)
           await storeUserInRegistry(localUser);
+          await saveOfflineCredential(email, password);
           
           // Store current session
           await SecureStore.setItemAsync('currentUser', JSON.stringify(localUser));
