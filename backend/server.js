@@ -250,6 +250,10 @@ const startServer = async () => {
     // Create admin user if it doesn't exist
     await createAdminUser();
     
+    if (!process.env.JWT_SECRET) {
+      console.warn('⚠️  JWT_SECRET is not set: sign-in, registration and every authenticated route will fail until it is set.');
+    }
+
     // Start listening
     app.listen(PORT, () => {
       console.log(`\n🚀 TLB Diamond API Server running on port ${PORT}`);
