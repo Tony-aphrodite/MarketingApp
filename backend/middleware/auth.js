@@ -13,8 +13,19 @@ const authenticateToken = async (req, res, next) => {
       });
     }
 
+    // Tokens are signed with JWT_SECRET only (routes/auth.js). There is no
+    // built-in fallback: a default secret in the repository would let anyone
+    // forge tokens on a server where JWT_SECRET is not set.
+    if (!process.env.JWT_SECRET) {
+      console.error('JWT_SECRET is not set; refusing to verify access tokens');
+      return res.status(500).json({
+        error: 'Internal Server Error',
+        message: 'Authentication is not configured'
+      });
+    }
+
     // Verify the token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'tlb-diamond-secret-key');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
     // Get user from database
     const user = await User.findByPk(decoded.userId, {
@@ -68,8 +79,8 @@ const optionalAuth = async (req, res, next) => {
     const authHeader = req.headers.authorization;
     const token = authHeader && authHeader.split(' ')[1];
 
-    if (token) {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'tlb-diamond-secret-key');
+    if (token && process.env.JWT_SECRET) {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
       const user = await User.findByPk(decoded.userId, {
         attributes: { exclude: ['password_hash'] }
       });
